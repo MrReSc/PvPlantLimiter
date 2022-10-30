@@ -1,4 +1,5 @@
 
+from doctest import ELLIPSIS_MARKER
 import paho.mqtt.client as mqtt
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -12,8 +13,9 @@ BROKER_PORT = 1883
 CLIENT_ID = "pvLimiter"
 
 SN_INV = ["1234567", "11225544"]
-INV_SUD = 1
-INV_NORD = 2
+INV_SUD = 0
+INV_NORD = 1
+LIMIT_SUD = 1200
 
 # MQTT Topics
 DTU_TOPIC = "solar/#"
@@ -31,32 +33,72 @@ for sn in SN_INV:
     GET_AC_PWR[sn] = "solar/" + sn + "/0/power"
 
 # Variabels
-systemAcPower = 0
+systemAcPower = 5
 invAcPower = {}
 invLimit = {}
 invIsProducting = {}
+threshold = 0;
 
 for sn in SN_INV:
     invAcPower[sn] = 0
     invLimit[sn] = 0
     invIsProducting[sn] = 0
 
-# Functions
+# Limiter
+def calcDynamicThreshold(value):
+    if (value > threshold):
+        threshold = value
+
+def limiter():
+    global systemAcPower
+
+    # calc the ac power of the system
+    for sn in SN_INV:
+        systemAcPower += invAcPower[sn]
+
+    snSouth = SN_INV[INV_SUD]
+    snNorth = SN_INV[INV_NORD]
+
+    # This code section is especially for my setup of several BKW
+    ############################################################################
+    # Is the system power < as max AC power?
+    # If yes then try to produce more
+    if (systemAcPower <= MAX_AC_PWR - threshold - INCREMENT):
+        # Is BKW north producing?
+        # If not then turn it on
+        if (invIsProducting[snNorth] == 0):
+            tunrInverterOn(snNorth, 1)
+            return
+        # If yes check if the power limit of BKW south is already maxed out   
+        else:
+            # If yes nothing to do
+            if (invLimit[snSouth] >= LIMIT_SUD):
+                return
+            # If not then increas the limit by step
+            else:
+                setLimitNonpersistentAbsolute(snSouth, invLimit[snSouth] + INCREMENT)
+
+    # If not then limit the System to max alowed AC power
+    if (systemAcPower > MAX_AC_PWR):
+        # Is BKW north producing?
+        # If yes then turn it off
+        if (invIsProducting[snNorth] == 1):
+            tunrInverterOn(snNorth, 0)
+            return
+        # If not then decrease the limit of BKW south
+        else:
+            setLimitNonpersistentAbsolute(snSouth, invLimit[snSouth] - INCREMENT)
+
+
+# Start background job for limiter
+scheduler = BackgroundScheduler()
+scheduler.add_job(limiter, 'interval', seconds = LIMITER_INTERVAL)
+scheduler.start()    
+
+# Setup MQTT Client
 def getSnFromTopic(topic):
     return topic.split("/")[1]
 
-def limiter():
-    print(systemAcPower)
-    print(invAcPower)
-    print(invLimit)
-    print(invIsProducting)
-
-# Background Job starten
-scheduler = BackgroundScheduler()
-scheduler.add_job(limiter, 'interval', seconds = LIMITER_INTERVAL)
-scheduler.start()
-
-# MQTT Client
 def on_message(client, userdata, message):
     msg = str(message.payload.decode("utf-8"))
     print("message received: ", msg)
@@ -80,7 +122,10 @@ def on_message_power(client, userdata, message):
     sn = getSnFromTopic(message.topic)
     invAcPower[sn] = int(float(msg))
 
-mqtt.Client.connected_flag=False
+    if (sn == SN_INV[INV_NORD]):
+        calcDynamicThreshold(invAcPower[sn])
+
+#mqtt.Client.connected_flag=False
 client = mqtt.Client(CLIENT_ID)
 client.connect(BROKER_IP, BROKER_PORT)
 
@@ -93,6 +138,13 @@ for sn in SN_INV:
 
 client.subscribe(DTU_TOPIC)
 client.on_connect = on_connect
+
+def setLimitNonpersistentAbsolute(sn, limit):
+    client.publish(GET_ABS_LIMIT[sn], limit)
+
+def tunrInverterOn(sn, power):
+    client.publish(SET_INV_ON[sn], power)
+
 client.loop_forever()
 
 
