@@ -1,17 +1,23 @@
 from doctest import ELLIPSIS_MARKER
+import os
 import paho.mqtt.client as mqtt
 from apscheduler.schedulers.background import BackgroundScheduler
 
 # Constants
-LIMITER_INTERVAL = 10.0  # s
-MAX_AC_PWR = 600        # W
-INCREMENT = 10          # W
+try:
+    DEBUG = os.environ["DEBUG"]
+except:
+    DEBUG = True
 
-BROKER_IP = "192.168.0.2"
-BROKER_PORT = 1883
-CLIENT_ID = "pvLimiter"
+LIMITER_INTERVAL = 10.0 if DEBUG else float(os.environ["LIMITER_INTERVAL"])
+MAX_AC_PWR = 600 if DEBUG else int(os.environ["MAX_AC_PWR"])
+INCREMENT = 10 if DEBUG else int(os.environ["INCREMENT"])
 
-SN_INV = ["1", "2"]
+BROKER_IP = "192.168.0.2" if DEBUG else os.environ["BROKER_IP"]
+BROKER_PORT = 1883 if DEBUG else int(os.environ["BROKER_PORT"])
+CLIENT_ID = "pvLimiter" if DEBUG else os.environ["CLIENT_ID"]
+
+SN_INV = ["1", "2"] if DEBUG else str(os.environ['SN_INV']).split(',')
 INV_SOUTH = 0
 INV_NORTH = 1
 LIMIT_SOUTH = 1200
@@ -20,7 +26,7 @@ YES = 1
 NO = 0
 
 # MQTT Topics
-DTU_TOPIC = "solar/#"
+DTU_TOPIC = "solar/#" if DEBUG else os.environ["CLIENT_ID"]
 SET_ABS_LIMIT = {}
 SET_INV_ON = {}
 GET_ABS_LIMIT = {}
