@@ -17,6 +17,9 @@ INV_SOUTH = 0
 INV_NORTH = 1
 LIMIT_SOUTH = 1200
 
+YES = 1
+NO = 0
+
 # MQTT Topics
 DTU_TOPIC = "solar/#"
 SET_ABS_LIMIT = {}
@@ -45,8 +48,8 @@ threshold = 0;
 for sn in SN_INV:
     invAcPower[sn] = 0
     invLimit[sn] = 0
-    invIsProducting[sn] = 0
-    invIsReachable[sn] = 0
+    invIsProducting[sn] = NO
+    invIsReachable[sn] = NO
 
 # Limiter
 def calcDynamicThreshold(value):
@@ -67,15 +70,15 @@ def limiter():
     ############################################################################
     
     # If south BKW is not online but north then power it on and control nothing
-    if (invIsReachable[snSouth] == 0 and invIsReachable[snNorth] == 1):
-        if (invIsProducting[snNorth] == 0):
-            tunrInverterOn(snNorth, 1)
+    if (invIsReachable[snSouth] == NO and invIsReachable[snNorth] == YES):
+        if (invIsProducting[snNorth] == NO):
+            tunrInverterOn(snNorth, YES)
             return
     
     # If none BKW is reachable then don't control anything
     systemIsReachable = False
     for sn in SN_INV:
-        if (invIsReachable[sn] == 1):
+        if (invIsReachable[sn] == YES):
             systemIsReachable = True
 
     if (not systemIsReachable):
@@ -86,8 +89,8 @@ def limiter():
     if (systemAcPower <= MAX_AC_PWR - threshold - INCREMENT):
         # Is BKW north producing?
         # If not then turn it on
-        if (invIsProducting[snNorth] == 0):
-            tunrInverterOn(snNorth, 1)
+        if (invIsProducting[snNorth] == NO):
+            tunrInverterOn(snNorth, YES)
             return
         # If yes check if the power limit of BKW south is already maxed out   
         else:
@@ -102,8 +105,8 @@ def limiter():
     if (systemAcPower > MAX_AC_PWR):
         # Is BKW north producing?
         # If yes then turn it off
-        if (invIsProducting[snNorth] == 1):
-            tunrInverterOn(snNorth, 0)
+        if (invIsProducting[snNorth] == YES):
+            tunrInverterOn(snNorth, NO)
             return
         # If not then decrease the limit of BKW south
         else:
