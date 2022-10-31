@@ -1,4 +1,3 @@
-
 from doctest import ELLIPSIS_MARKER
 import paho.mqtt.client as mqtt
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -12,7 +11,7 @@ BROKER_IP = "192.168.0.2"
 BROKER_PORT = 1883
 CLIENT_ID = "pvLimiter"
 
-SN_INV = ["1234567", "11225544"]
+SN_INV = ["1", "2"]
 INV_SOUTH = 0
 INV_NORTH = 1
 LIMIT_SOUTH = 1200
@@ -53,6 +52,7 @@ for sn in SN_INV:
 
 # Limiter
 def calcDynamicThreshold(value):
+    global threshold
     if (value > threshold):
         threshold = value
 
@@ -60,15 +60,15 @@ def limiter():
     global systemAcPower
 
     # calc the ac power of the system
+    systemAcPower = 0
     for sn in SN_INV:
         systemAcPower += invAcPower[sn]
-
-    snSouth = SN_INV[INV_SOUTH]
-    snNorth = SN_INV[INV_NORTH]
-    
+ 
     # This code section is especially for my setup of several BKW
     ############################################################################
-    
+    snSouth = SN_INV[INV_SOUTH]
+    snNorth = SN_INV[INV_NORTH]
+
     # If south BKW is not online but north then power it on and control nothing
     if (invIsReachable[snSouth] == NO and invIsReachable[snNorth] == YES):
         if (invIsProducting[snNorth] == NO):
@@ -111,7 +111,7 @@ def limiter():
         # If not then decrease the limit of BKW south
         else:
             setLimitNonpersistentAbsolute(snSouth, invLimit[snSouth] - INCREMENT)
-
+    ############################################################################
 
 # Start background job for limiter
 scheduler = BackgroundScheduler()
@@ -175,6 +175,3 @@ def tunrInverterOn(sn, power):
     client.publish(SET_INV_ON[sn], power)
 
 client.loop_forever()
-
-
-

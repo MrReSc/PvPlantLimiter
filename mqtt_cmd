@@ -1,0 +1,9 @@
+mosquitto_pub -h 192.168.0.2 -m 400.0 -t solar/1/status/limit_absolute
+mosquitto_pub -h 192.168.0.2 -m 200.0 -t solar/2/status/limit_absolute
+mosquitto_pub -h 192.168.0.2 -m 1 -t solar/1/status/producing
+mosquitto_pub -h 192.168.0.2 -m 1 -t solar/1/status/reachable
+mosquitto_pub -h 192.168.0.2 -m 1 -t solar/2/status/producing
+mosquitto_pub -h 192.168.0.2 -m 1 -t solar/2/status/reachable
+mosquitto_pub -h 192.168.0.2 -m 430.0 -t solar/1/0/power
+mosquitto_pub -h 192.168.0.2 -m 30.0 -t solar/2/0/power
+clear
