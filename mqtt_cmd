@@ -7,3 +7,7 @@ mosquitto_pub -h 192.168.0.2 -m 1 -t solar/2/status/reachable
 mosquitto_pub -h 192.168.0.2 -m 430.0 -t solar/1/0/power
 mosquitto_pub -h 192.168.0.2 -m 30.0 -t solar/2/0/power
 clear
+
+mosquitto_pub -h 192.168.0.2 -m 30 -t limiter/cmd/limit_nonpersistent_absolute
+
+mosquitto_pub -h 192.168.0.2 -m 30.0 -t limiter/cmd/controler_interval

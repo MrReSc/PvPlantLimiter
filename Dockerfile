@@ -1,6 +1,6 @@
 FROM python:3.9-alpine
 
-LABEL Name=pvLimiter=0.0.1
+LABEL Name=pv_plant_limiter=0.0.1
 
 WORKDIR /
 COPY requirements.txt .

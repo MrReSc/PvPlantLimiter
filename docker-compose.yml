@@ -2,18 +2,20 @@ version: '2.1'
 
 services:
   pv_limiter:
-    image: pvLimiter:latest
+    image: pv_plant_limiter:latest
     container_name: PvLimiter
     restart: always
     build: .
     environment:
+      - TZ=Europe/Zurich
       - LIMITER_INTERVAL=10.0
       - MAX_AC_PWR=600
       - INCREMENT=10
       - BROKER_IP=192.168.0.2
       - BROKER_PORT=1886
       - CLIENT_ID=pvLimiter
-      - DTU_TOPIC=solar/#
+      - DTU_TOPIC=solar/
+      - LIMITER_TOPIC=limiter/
       - SN_INV=1,2  #Inverter 1 = south, Inverter 2 = north
       - DEBUG=False
 

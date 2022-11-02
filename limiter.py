@@ -26,7 +26,8 @@ YES = 1
 NO = 0
 
 # MQTT Topics
-DTU_TOPIC = "solar/#" if DEBUG else os.environ["CLIENT_ID"]
+DTU_TOPIC = "solar/" if DEBUG else os.environ["DTU_TOPIC"]
+LIMITER_TOPIC = "limiter/" if DEBUG else os.environ["LIMITER_TOPIC"]
 SET_ABS_LIMIT = {}
 SET_INV_ON = {}
 GET_ABS_LIMIT = {}
@@ -35,12 +36,16 @@ GET_IS_PRODUCING = {}
 GET_IS_REACHABLE = {}
 
 for sn in SN_INV:
-    SET_ABS_LIMIT[sn] = "solar/" + sn + "/cmd/limit_persistent_absolute"
-    SET_INV_ON[sn] = "solar/" + sn + "/cmd/power"
-    GET_ABS_LIMIT[sn] = "solar/" + sn + "/status/limit_absolute"
-    GET_IS_PRODUCING[sn] = "solar/" + sn + "/status/producing"
-    GET_IS_REACHABLE[sn] = "solar/" + sn + "/status/reachable"
-    GET_AC_PWR[sn] = "solar/" + sn + "/0/power"
+    SET_ABS_LIMIT[sn] = DTU_TOPIC + sn + "/cmd/limit_nonpersistent_absolute"
+    SET_INV_ON[sn] = DTU_TOPIC + sn + "/cmd/power"
+    GET_ABS_LIMIT[sn] = DTU_TOPIC + sn + "/status/limit_absolute"
+    GET_IS_PRODUCING[sn] = DTU_TOPIC + sn + "/status/producing"
+    GET_IS_REACHABLE[sn] = DTU_TOPIC + sn + "/status/reachable"
+    GET_AC_PWR[sn] = DTU_TOPIC + sn + "/0/power"
+
+SET_LIMITER_MAX_AC_PWR = "limiter/cmd/limit_nonpersistent_absolute"
+SET_LIMITER_INTERVAL = "limiter/cmd/controler_interval"
+SET_LIMITER_INCREMENT = "limiter/cmd/controler_increment"
 
 # Variabels
 systemAcPower = 5
@@ -49,6 +54,10 @@ invLimit = {}
 invIsProducting = {}
 invIsReachable = {}
 threshold = 0;
+
+limiterInterval = LIMITER_INTERVAL
+maxAcPower = MAX_AC_PWR
+increment = INCREMENT
 
 for sn in SN_INV:
     invAcPower[sn] = 0
@@ -92,7 +101,7 @@ def limiter():
       
     # Is the system power < as max AC power?
     # If yes then try to produce more
-    if (systemAcPower <= MAX_AC_PWR - threshold - INCREMENT):
+    if (systemAcPower <= maxAcPower - threshold - increment):
         # Is BKW north producing?
         # If not then turn it on
         if (invIsProducting[snNorth] == NO):
@@ -105,10 +114,10 @@ def limiter():
                 return
             # If not then increas the limit by step
             else:
-                setLimitNonpersistentAbsolute(snSouth, invLimit[snSouth] + INCREMENT)
+                setLimitNonpersistentAbsolute(snSouth, invLimit[snSouth] + increment)
 
     # If not then limit the System to max alowed AC power
-    if (systemAcPower > MAX_AC_PWR):
+    if (systemAcPower > maxAcPower):
         # Is BKW north producing?
         # If yes then turn it off
         if (invIsProducting[snNorth] == YES):
@@ -116,12 +125,17 @@ def limiter():
             return
         # If not then decrease the limit of BKW south
         else:
-            setLimitNonpersistentAbsolute(snSouth, invLimit[snSouth] - INCREMENT)
+            setLimitNonpersistentAbsolute(snSouth, invLimit[snSouth] - increment)
     ############################################################################
+
+def resetNonpersitentValues():
+    global maxAcPower
+    maxAcPower = MAX_AC_PWR
 
 # Start background job for limiter
 scheduler = BackgroundScheduler()
-scheduler.add_job(limiter, 'interval', seconds = LIMITER_INTERVAL)
+limiterJob = scheduler.add_job(limiter, 'interval', seconds = LIMITER_INTERVAL)
+resetJob = scheduler.add_job(limiter, 'cron', minute=0, hour=0)
 scheduler.start()    
 
 # Setup MQTT Client
@@ -159,6 +173,22 @@ def on_message_power(client, userdata, message):
     if (sn == SN_INV[INV_NORTH]):
         calcDynamicThreshold(invAcPower[sn])
 
+def on_message_limit_nonpersistent_absolute(client, userdata, message):
+    global maxAcPower
+    msg = str(message.payload.decode("utf-8"))
+    maxAcPower = int(msg)
+
+def on_message_controler_interval(client, userdata, message):
+    global limiterInterval
+    msg = str(message.payload.decode("utf-8"))
+    limiterInterval = float(msg)
+    limiterJob.reschedule(trigger = "interval", seconds = limiterInterval)
+
+def on_message_controler_increment(client, userdata, message):
+    global increment
+    msg = str(message.payload.decode("utf-8"))
+    increment = int(msg)
+
 #mqtt.Client.connected_flag=False
 client = mqtt.Client(CLIENT_ID)
 client.connect(BROKER_IP, BROKER_PORT)
@@ -171,11 +201,15 @@ for sn in SN_INV:
     client.message_callback_add(GET_IS_REACHABLE[sn], on_message_reachable)
     client.message_callback_add(GET_AC_PWR[sn], on_message_power)
 
-client.subscribe(DTU_TOPIC)
+client.message_callback_add(SET_LIMITER_MAX_AC_PWR, on_message_limit_nonpersistent_absolute)
+client.message_callback_add(SET_LIMITER_INTERVAL, on_message_controler_interval)
+client.message_callback_add(SET_LIMITER_INCREMENT, on_message_controler_increment)
+
+client.subscribe([(DTU_TOPIC + "#", 0), (LIMITER_TOPIC + "#", 0)])
 client.on_connect = on_connect
 
 def setLimitNonpersistentAbsolute(sn, limit):
-    client.publish(GET_ABS_LIMIT[sn], limit)
+    client.publish(SET_ABS_LIMIT[sn], limit)
 
 def tunrInverterOn(sn, power):
     client.publish(SET_INV_ON[sn], power)
