@@ -20,7 +20,7 @@ CLIENT_ID = "pvLimiter" if DEBUG else os.environ["CLIENT_ID"]
 SN_INV = ["1", "2"] if DEBUG else str(os.environ['SN_INV']).split(',')
 INV_SOUTH = 0
 INV_NORTH = 1
-LIMIT_SOUTH = 800
+LIMIT_SOUTH = 800 if DEBUG else int(os.environ["LIMIT_SOUTH"])
 
 YES = 1
 NO = 0
@@ -58,7 +58,6 @@ invIsReachable = {}
 limiterInterval = LIMITER_INTERVAL
 maxAcPower = MAX_AC_PWR
 increment = INCREMENT
-limitSouth = LIMIT_SOUTH
 
 for sn in SN_INV:
     invAcPower[sn] = 0
@@ -79,21 +78,9 @@ def limiter():
     # This code section is especially for my setup of several BKW
     ############################################################################
     snSouth = SN_INV[INV_SOUTH]
-    snNorth = SN_INV[INV_NORTH]
-
-    # If south BKW is not online but north then power it on and control nothing
-    if (invIsReachable[snSouth] == NO and invIsReachable[snNorth] == YES):
-        if (invIsProducting[snNorth] == NO):
-            tunrInverterOn(snNorth, YES)
-            return
-    
-    # If none BKW is reachable then don't control anything
-    systemIsReachable = False
-    for sn in SN_INV:
-        if (invIsReachable[sn] == YES):
-            systemIsReachable = True
-
-    if (not systemIsReachable):
+  
+    # If south BKW is not reachable then don't control anything
+    if (invIsReachable[snSouth] == NO):
         return
 
     # Shadow detector
@@ -104,28 +91,23 @@ def limiter():
     # maximum AC limit of 600 W only 300 W plus the shaded part can be produced. 
     # So if shading is suspected, the maximum AC limit is temporarily increased.
 
+    # NOT YET IMPLEMENTED
+
     # ---------------------------------------------------------------------------------------
       
     # Is the system power < as max AC power?
     # If yes then try to produce more
     if (systemAcPower <= maxAcPower - increment):
-        # Is BKW north producing?
-        # If not then turn it on
-        if (invIsProducting[snNorth] == NO):
-            tunrInverterOn(snNorth, YES)
+        if (invLimit[snSouth] >= LIMIT_SOUTH):
             return
-        # If yes check if the power limit of BKW south is already maxed out   
+        # If not then increas the limit by step
         else:
-            # If yes nothing to do
-            if (invLimit[snSouth] >= limitSouth):
-                return
-            # If not then increas the limit by step
-            else:
-                setLimitNonpersistentAbsolute(snSouth, invLimit[snSouth] + increment)
+            setLimitNonpersistentAbsolute(snSouth, invLimit[snSouth] + increment)
 
     # If not then limit the System to max alowed AC power
     if (systemAcPower > maxAcPower):
-        setLimitNonpersistentAbsolute(snSouth, maxAcPower - invAcPower[snNorth])
+        newLimit = maxAcPower - (systemAcPower - invAcPower[snSouth])
+        setLimitNonpersistentAbsolute(snSouth, newLimit)
     ############################################################################
 
 def resetNonpersitentValues():
@@ -135,8 +117,8 @@ def resetNonpersitentValues():
 # Start background job for limiter
 scheduler = BackgroundScheduler()
 limiterJob = scheduler.add_job(limiter, 'interval', seconds = LIMITER_INTERVAL)
-resetJob = scheduler.add_job(limiter, 'cron', minute=0, hour=0)
-scheduler.start()    
+resetJob = scheduler.add_job(resetNonpersitentValues, 'cron', minute=0, hour=0)
+scheduler.start()
 
 # Setup MQTT Client
 def getSnFromTopic(topic):

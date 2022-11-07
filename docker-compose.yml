@@ -10,6 +10,7 @@ services:
       - TZ=Europe/Zurich
       - LIMITER_INTERVAL=10.0
       - MAX_AC_PWR=600
+      - LIMIT_SOUTH=800
       - INCREMENT=10
       - BROKER_IP=192.168.0.2
       - BROKER_PORT=1886
