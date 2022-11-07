@@ -20,7 +20,7 @@ CLIENT_ID = "pvLimiter" if DEBUG else os.environ["CLIENT_ID"]
 SN_INV = ["1", "2"] if DEBUG else str(os.environ['SN_INV']).split(',')
 INV_SOUTH = 0
 INV_NORTH = 1
-LIMIT_SOUTH = 1200
+LIMIT_SOUTH = 800
 
 YES = 1
 NO = 0
@@ -43,33 +43,28 @@ for sn in SN_INV:
     GET_IS_REACHABLE[sn] = DTU_TOPIC + sn + "/status/reachable"
     GET_AC_PWR[sn] = DTU_TOPIC + sn + "/0/power"
 
-SET_LIMITER_MAX_AC_PWR = "limiter/cmd/limit_nonpersistent_absolute"
-SET_LIMITER_INTERVAL = "limiter/cmd/controler_interval"
-SET_LIMITER_INCREMENT = "limiter/cmd/controler_increment"
+SET_LIMITER_MAX_AC_PWR = LIMITER_TOPIC + "cmd/limit_nonpersistent_absolute"
+SET_LIMITER_INTERVAL = LIMITER_TOPIC + "cmd/controler_interval"
+SET_LIMITER_INCREMENT = LIMITER_TOPIC + "cmd/controler_increment"
+LIMITER_SYSTEM_AC_PWR = LIMITER_TOPIC + "status/system_power"
 
 # Variabels
-systemAcPower = 5
+systemAcPower = 0
 invAcPower = {}
 invLimit = {}
 invIsProducting = {}
 invIsReachable = {}
-threshold = 0;
 
 limiterInterval = LIMITER_INTERVAL
 maxAcPower = MAX_AC_PWR
 increment = INCREMENT
+limitSouth = LIMIT_SOUTH
 
 for sn in SN_INV:
     invAcPower[sn] = 0
     invLimit[sn] = 0
     invIsProducting[sn] = NO
     invIsReachable[sn] = NO
-
-# Limiter
-def calcDynamicThreshold(value):
-    global threshold
-    if (value > threshold):
-        threshold = value
 
 def limiter():
     global systemAcPower
@@ -78,7 +73,9 @@ def limiter():
     systemAcPower = 0
     for sn in SN_INV:
         systemAcPower += invAcPower[sn]
- 
+
+    publishSystemAcPwr(systemAcPower)
+    
     # This code section is especially for my setup of several BKW
     ############################################################################
     snSouth = SN_INV[INV_SOUTH]
@@ -98,10 +95,20 @@ def limiter():
 
     if (not systemIsReachable):
         return
+
+    # Shadow detector
+    # ---------------------------------------------------------------------------------------
+    # If there is a significant difference in DC power between channel 1&2 and channel 3&4, 
+    # then it is very likely that one part has shaded. Since the HM-1200 has only two MPPT, 
+    # the maximum AC limit is divided between these two MTTP. This means that with a 
+    # maximum AC limit of 600 W only 300 W plus the shaded part can be produced. 
+    # So if shading is suspected, the maximum AC limit is temporarily increased.
+
+    # ---------------------------------------------------------------------------------------
       
     # Is the system power < as max AC power?
     # If yes then try to produce more
-    if (systemAcPower <= maxAcPower - threshold - increment):
+    if (systemAcPower <= maxAcPower - increment):
         # Is BKW north producing?
         # If not then turn it on
         if (invIsProducting[snNorth] == NO):
@@ -110,7 +117,7 @@ def limiter():
         # If yes check if the power limit of BKW south is already maxed out   
         else:
             # If yes nothing to do
-            if (invLimit[snSouth] >= LIMIT_SOUTH):
+            if (invLimit[snSouth] >= limitSouth):
                 return
             # If not then increas the limit by step
             else:
@@ -118,14 +125,7 @@ def limiter():
 
     # If not then limit the System to max alowed AC power
     if (systemAcPower > maxAcPower):
-        # Is BKW north producing?
-        # If yes then turn it off
-        if (invIsProducting[snNorth] == YES):
-            tunrInverterOn(snNorth, NO)
-            return
-        # If not then decrease the limit of BKW south
-        else:
-            setLimitNonpersistentAbsolute(snSouth, invLimit[snSouth] - increment)
+        setLimitNonpersistentAbsolute(snSouth, maxAcPower - invAcPower[snNorth])
     ############################################################################
 
 def resetNonpersitentValues():
@@ -170,9 +170,6 @@ def on_message_power(client, userdata, message):
     sn = getSnFromTopic(message.topic)
     invAcPower[sn] = int(float(msg))
 
-    if (sn == SN_INV[INV_NORTH]):
-        calcDynamicThreshold(invAcPower[sn])
-
 def on_message_limit_nonpersistent_absolute(client, userdata, message):
     global maxAcPower
     msg = str(message.payload.decode("utf-8"))
@@ -213,5 +210,8 @@ def setLimitNonpersistentAbsolute(sn, limit):
 
 def tunrInverterOn(sn, power):
     client.publish(SET_INV_ON[sn], power)
+
+def publishSystemAcPwr(power):
+    client.publish(LIMITER_SYSTEM_AC_PWR, power)    
 
 client.loop_forever()
