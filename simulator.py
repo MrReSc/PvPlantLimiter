@@ -8,6 +8,8 @@ import random
 BROKER_IP = "192.168.0.2"
 BROKER_PORT = 1883
 
+MAX_AC_PWR = 600
+
 SN_INV = ["1", "2"]
 INV_SOUTH = 0
 
@@ -33,8 +35,12 @@ POWER_CURVE.sort()
 for num in reversed(POWER_CURVE):
 	POWER_CURVE.append(num)
 
+for num in reversed(POWER_CURVE):
+    POWER_CURVE.append(num)
+
 # Variabels
 invAcPower = {}
+invDcPower = {}
 invIsProducting = {}
 powerCurveCounter = 0
 invLimit = {SN_INV[INV_NORTH] : 300, SN_INV[INV_SOUTH] : 600}
@@ -43,29 +49,35 @@ invLimit = {SN_INV[INV_NORTH] : 300, SN_INV[INV_SOUTH] : 600}
 for sn in SN_INV:
     invAcPower[sn] = 0
     invIsProducting[sn] = YES
+    invDcPower[sn] = list(range(4))
 
 def simualtor():
     global invAcPower
     global powerCurveCounter
     
     powerCurveCounter += 1
-    if powerCurveCounter > len(POWER_CURVE):
+    if powerCurveCounter > len(POWER_CURVE) - 1 :
         powerCurveCounter = 0
+
+    if powerCurveCounter < len(POWER_CURVE) / 2:
+        shadow = True
+    else:
+        shadow = False
 
     snSouth = SN_INV[INV_SOUTH]
     snNorth = SN_INV[INV_NORTH]
 
     for sn in SN_INV:
-        client.publish(DTU_TOPIC + sn + "/status/reachable", "1")
+        client.publish(DTU_TOPIC + sn + "/status/reachable", 1)
 
     # BKW north
     if invIsProducting[snNorth] == YES:
         invAcPower[snNorth] = 60
-        client.publish(DTU_TOPIC + snNorth + "/status/producing", "1")
+        client.publish(DTU_TOPIC + snNorth + "/status/producing", 1)
 
     else:
         invAcPower[snNorth] = 0     
-        client.publish(DTU_TOPIC + snNorth + "/status/producing", "0")   
+        client.publish(DTU_TOPIC + snNorth + "/status/producing", 0)   
 
 
     # BKW south
@@ -73,18 +85,32 @@ def simualtor():
         if POWER_CURVE[powerCurveCounter] <= invLimit[snSouth]:
             invAcPower[snSouth] = POWER_CURVE[powerCurveCounter]
         else:
-            invAcPower[snSouth] = invLimit[snSouth] 
-            client.publish(DTU_TOPIC + snSouth + "/status/producing", "1")
+            if shadow:
+                invAcPower[snSouth] = MAX_AC_PWR - invAcPower[snNorth]
+            else:
+                invAcPower[snSouth] = invLimit[snSouth] 
+            client.publish(DTU_TOPIC + snSouth + "/status/producing", 1)
 
+        if shadow:                   
+            invDcPower[snSouth][0] = invAcPower[snSouth] * 0.1
+            invDcPower[snSouth][1] = invAcPower[snSouth] * 0.1
+            invDcPower[snSouth][2] = invAcPower[snSouth] * 0.4
+            invDcPower[snSouth][3] = invAcPower[snSouth] * 0.4
+        else:
+            invDcPower[snSouth][0] = invAcPower[snSouth] * 0.25
+            invDcPower[snSouth][1] = invAcPower[snSouth] * 0.25
+            invDcPower[snSouth][2] = invAcPower[snSouth] * 0.25
+            invDcPower[snSouth][3] = invAcPower[snSouth] * 0.25
     else:
         invAcPower[snSouth] = 0     
-        client.publish(DTU_TOPIC + snSouth + "/status/producing", "0")   
+        client.publish(DTU_TOPIC + snSouth + "/status/producing", 0)   
 
     # publish power and current limits
     for sn in SN_INV:
-        client.publish(DTU_TOPIC + sn + "/0/power", str(invAcPower[sn]))
-        client.publish(DTU_TOPIC + sn + "/status/limit_absolute", str(invLimit[sn]))
-
+        client.publish(DTU_TOPIC + sn + "/0/power", float(invAcPower[sn]))
+        client.publish(DTU_TOPIC + sn + "/status/limit_absolute", float(invLimit[sn]))
+        for i in range(4):
+            client.publish(DTU_TOPIC + sn + "/" + str(i + 1) + "/power", float(invDcPower[sn][i]))    
 
 
 # Start background job for limiter
