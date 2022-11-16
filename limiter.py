@@ -87,6 +87,13 @@ def get_percent_diff(value1, value2):
     except ZeroDivisionError:
         return float('inf')    
 
+def is_channel_limit_reached(value1, value2, sn, mttpNo):
+    maxPossiblePower = (invLimit[sn] / mttpNo) - 10
+    if value1 > maxPossiblePower or value2 > maxPossiblePower:
+        return True
+    else:
+        return False
+
 def limiter():
     global systemAcPower
 
@@ -116,7 +123,9 @@ def limiter():
     pwrCh34 = invDcPower[snSouth][2] + invDcPower[snSouth][3]
     diff = get_percent_diff(pwrCh12, pwrCh34)
 
-    if diff >= shadowDiff and shadowDiff > 0 and shadowDiff < 100:
+    # If a significant percent difference is detected and the limit of one MTTP is reached,
+    # then there is likely shading on one MTTP and the other MTTP is getting a lot of sun.
+    if diff >= shadowDiff and shadowDiff > 0 and shadowDiff < 100 and is_channel_limit_reached(pwrCh12, pwrCh34, snSouth, 2):
         shadow = YES
     else: 
         shadow = NO
