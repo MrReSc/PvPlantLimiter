@@ -8,14 +8,12 @@ services:
     build: .
     environment:
       - TZ=Europe/Zurich
-      - LIMITER_INTERVAL=10.0   # cyclic interval of limiter algo
-      - MAX_AC_PWR=600          # max allowed AC Power of all inerverts
-      - LIMIT_SOUTH=600         # limit of the south plant
-      - SHADOW_DIFF=70          # diffrence in % between DC1&2 and DV3&4 of HM-1200; 0 = shadow detection off
-      - INCREMENT=10            # increment used for shadow function
-      - BROKER_IP=192.168.0.2   # mqtt broker ip
-      - BROKER_PORT=1886        # mqtt broker port
-      - DTU_TOPIC=solar/        # openDTU base topic
-      - LIMITER_TOPIC=limiter/  # limiter base topic
-      - SN_INV=1,2              # Inverter 1 = south, Inverter 2 = north
+      - LIMITER_INTERVAL=20.0             # cyclic interval of limiter algo
+      - MAX_AC_PWR=600                    # max allowed AC Power of all inerverts
+      - INCREMENT=20                      # increment used for shadow function
+      - BROKER_IP=192.168.0.2             # mqtt broker ip
+      - BROKER_PORT=1886                  # mqtt broker port
+      - DTU_TOPIC=solar/                  # openDTU base topic
+      - LIMITER_TOPIC=limiter/            # limiter base topic
+      - SN_INV=1,2                        # Inverter 1 = south, Inverter 2 = north
 

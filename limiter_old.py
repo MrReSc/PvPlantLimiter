@@ -9,20 +9,21 @@ try:
 except:
     DEBUG = True
 
-LIMITER_INTERVAL = 20.0 if DEBUG else float(os.environ["LIMITER_INTERVAL"])
+LIMITER_INTERVAL = 10.0 if DEBUG else float(os.environ["LIMITER_INTERVAL"])
 MAX_AC_PWR = 600 if DEBUG else int(os.environ["MAX_AC_PWR"])
-INCREMENT = 20 if DEBUG else int(os.environ["INCREMENT"])
+INCREMENT = 10 if DEBUG else int(os.environ["INCREMENT"])
 
 BROKER_IP = "192.168.0.2" if DEBUG else os.environ["BROKER_IP"]
 BROKER_PORT = 1883 if DEBUG else int(os.environ["BROKER_PORT"])
 CLIENT_ID = "pvLimiter"
 
 SN_INV = ["1", "2"] if DEBUG else str(os.environ['SN_INV']).split(',')
+LIMIT_SOUTH = 600 if DEBUG else int(os.environ["LIMIT_SOUTH"])
+SHADOW_DIFF = 70 if DEBUG else int(os.environ["SHADOW_DIFF"])
 
 INV_SOUTH = 0
 INV_NORTH = 1
 TYPE_SOUTH = 1200
-TYPE_NORTH = 600
 
 YES = 1
 NO = 0
@@ -53,10 +54,9 @@ for sn in SN_INV:
 SET_LIMITER_MAX_AC_PWR = LIMITER_TOPIC + "cmd/limit_nonpersistent_absolute"
 SET_LIMITER_INTERVAL = LIMITER_TOPIC + "cmd/controler_interval"
 SET_LIMITER_INCREMENT = LIMITER_TOPIC + "cmd/controler_increment"
+SET_LIMITER_SHADOW_DIFF = LIMITER_TOPIC + "cmd/shadow_diff"
 LIMITER_SYSTEM_AC_PWR = LIMITER_TOPIC + "status/system_power"
-LIMITER_SYSTEM_LIMIT = LIMITER_TOPIC + "status/system_limit"
-LIMITER_CONTROLER_INTERVAL = LIMITER_TOPIC + "status/controler_interval"
-LIMITER_CONTROLER_INCREMENT = LIMITER_TOPIC + "status/controler_increment"
+LIMITER_SHADOW_MODE = LIMITER_TOPIC + "status/shadow_mode"
 
 # Variabels
 systemAcPower = 0
@@ -69,6 +69,8 @@ invIsReachable = {}
 limiterInterval = LIMITER_INTERVAL
 maxAcPower = MAX_AC_PWR
 increment = INCREMENT
+shadowDiff = SHADOW_DIFF
+shadow = False
 
 for sn in SN_INV:
     invAcPower[sn] = 0
@@ -77,11 +79,20 @@ for sn in SN_INV:
     invIsReachable[sn] = NO
     invDcPower[sn] = list(range(4))
 
-def get_new_limit(val, limit):
-    if val > limit:
-        return limit
+def get_percent_diff(value1, value2):
+    if value1 == value2:
+        return 0
+    try:
+        return (abs(value1 - value2) / value2) * 100.0
+    except ZeroDivisionError:
+        return float('inf')    
+
+def is_channel_limit_reached(value1, value2, sn, mttpNo):
+    maxPossiblePower = (invLimit[sn] / mttpNo) - 10
+    if value1 > maxPossiblePower or value2 > maxPossiblePower:
+        return True
     else:
-        return val
+        return False
 
 def limiter():
     global systemAcPower
@@ -92,40 +103,56 @@ def limiter():
         systemAcPower += invAcPower[sn]
 
     publishSystemAcPwr(systemAcPower)
-    publishSystemLimit(maxAcPower)
-    publishLimiterInterval(limiterInterval)
-    publishLimiterIncrement(increment)
     
     # This code section is especially for my setup of several BKW
     ############################################################################
     snSouth = SN_INV[INV_SOUTH]
-    snNorth = SN_INV[INV_NORTH]
   
-    # If no BKW is reachable then don't control anything
-    if (invIsReachable[snSouth] == NO and invIsReachable[snNorth] == NO):
+    # If south BKW is not reachable then don't control anything
+    if (invIsReachable[snSouth] == NO):
         return
-    
-    # If system power > as max AC power then limit the System to max alowed AC power
-    if (systemAcPower > maxAcPower):
-        # Determine which BKW is currently sunlit based on the utilization rate
-        percentSouth = (100 / TYPE_SOUTH) * invAcPower[snSouth]
-        percentNorth = (100 / TYPE_NORTH) * invAcPower[snNorth]
 
-        # The BKW that receives more sunlight is controlled first, as it is likely to respond more dynamically
-        if (percentSouth >= percentNorth):
-            setLimitNonpersistentAbsolute(snSouth, invAcPower[snSouth] - (systemAcPower - maxAcPower))
-        else:
-            setLimitNonpersistentAbsolute(snNorth, invAcPower[snNorth] - (systemAcPower - maxAcPower))
+    # Shadow detector
+    # ---------------------------------------------------------------------------------------
+    # If there is a significant difference in DC power between channel 1&2 and channel 3&4, 
+    # then it is very likely that one part has shaded. Since the HM-1200 has only two MPPT, 
+    # the maximum AC limit is divided between these two MTTP. This means that with a 
+    # maximum AC limit of 600 W each MTTP can produce 300 W at max.
+    # So if shading is suspected, the maximum AC limit is temporarily increased.
+    pwrCh12 = invDcPower[snSouth][0] + invDcPower[snSouth][1]
+    pwrCh34 = invDcPower[snSouth][2] + invDcPower[snSouth][3]
+    diff = get_percent_diff(pwrCh12, pwrCh34)
 
+    # If a significant percent difference is detected and the limit of one MTTP is reached,
+    # then there is likely shading on one MTTP and the other MTTP is getting a lot of sun.
+    if diff >= shadowDiff and shadowDiff > 0 and shadowDiff < 100 and is_channel_limit_reached(pwrCh12, pwrCh34, snSouth, 2):
+        shadow = YES
+    else: 
+        shadow = NO
+    publishShadowMode(shadow)
+    # ---------------------------------------------------------------------------------------
+      
     # Is the system power < as max AC power?
     # If yes then try to produce more
-    if (systemAcPower < maxAcPower - increment):
-        if (invLimit[snSouth] < TYPE_SOUTH):
-            setLimitNonpersistentAbsolute(snSouth, get_new_limit(invLimit[snSouth] + increment, TYPE_SOUTH))
+    if (systemAcPower <= maxAcPower - increment):
+        # If no shadow is detected then set it to max limit
+        if (shadow == NO):
+            setLimitNonpersistentAbsolute(snSouth, LIMIT_SOUTH)
+        # If shadow is detectet the increase the limit step by step
+        if (shadow == YES and invLimit[snSouth] < TYPE_SOUTH):
+            setLimitNonpersistentAbsolute(snSouth, invLimit[snSouth] + increment)
 
-        if (invLimit[snNorth] < TYPE_NORTH):    
-            setLimitNonpersistentAbsolute(snNorth, get_new_limit(invLimit[snNorth] + increment, TYPE_NORTH))
 
+    # If not then limit the System to max alowed AC power
+    if (systemAcPower > maxAcPower):
+        if (shadow == NO):
+            # max minus current power of the aux pv plants
+            newLimit = maxAcPower - (systemAcPower - invAcPower[snSouth])
+        else:
+             # current limit minus increment
+            newLimit = invLimit[snSouth] - increment
+
+        setLimitNonpersistentAbsolute(snSouth, newLimit)
     ############################################################################
 
 def resetNonpersitentValues():
@@ -195,6 +222,11 @@ def on_message_controler_increment(client, userdata, message):
     msg = str(message.payload.decode("utf-8"))
     increment = int(msg)
 
+def on_message_shadow_diff(client, userdata, message):
+    global shadowDiff
+    msg = str(message.payload.decode("utf-8"))
+    shadowDiff = int(msg)
+
 #mqtt.Client.connected_flag=False
 client = mqtt.Client(CLIENT_ID)
 client.connect(BROKER_IP, BROKER_PORT)
@@ -212,6 +244,7 @@ for sn in SN_INV:
 client.message_callback_add(SET_LIMITER_MAX_AC_PWR, on_message_limit_nonpersistent_absolute)
 client.message_callback_add(SET_LIMITER_INTERVAL, on_message_controler_interval)
 client.message_callback_add(SET_LIMITER_INCREMENT, on_message_controler_increment)
+client.message_callback_add(SET_LIMITER_SHADOW_DIFF, on_message_shadow_diff)
 
 client.subscribe([(DTU_TOPIC + "#", 0), (LIMITER_TOPIC + "#", 0)])
 client.on_connect = on_connect
@@ -225,13 +258,7 @@ def tunrInverterOn(sn, power):
 def publishSystemAcPwr(power):
     client.publish(LIMITER_SYSTEM_AC_PWR, float(power))  
 
-def publishSystemLimit(power):
-    client.publish(LIMITER_SYSTEM_LIMIT, power)
-
-def publishLimiterInterval(value):
-    client.publish(LIMITER_CONTROLER_INTERVAL, float(value))
-
-def publishLimiterIncrement(value):
-    client.publish(LIMITER_CONTROLER_INCREMENT, value)
+def publishShadowMode(mode):
+    client.publish(LIMITER_SHADOW_MODE, mode)     
 
 client.loop_forever()
